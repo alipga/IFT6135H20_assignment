@@ -40,6 +40,7 @@ def clones(module, N):
 
 class RNN(nn.Module):
     """ A stacked vanilla RNN with Tanh nonlinearities."""
+
     def __init__(self, emb_size, hidden_size, seq_len, batch_size, vocab_size,
                  num_layers, dp_keep_prob):
         """
@@ -67,14 +68,14 @@ class RNN(nn.Module):
         self.vocab_size = vocab_size
         self.dp_keep_prob = dp_keep_prob
         self.num_layers = num_layers
-        self.embeddings = nn.Embedding(self.vocab_size,self.emb_size)
+        self.embeddings = nn.Embedding(self.vocab_size, self.emb_size)
 
         # Create layers
         self.layers = nn.ModuleList()
         # The first layer
         self.layers.append(nn.Linear(emb_size + hidden_size, hidden_size))
         # The hidden layers
-        self.layers.extend(clones(nn.Linear(2*hidden_size, hidden_size), num_layers-1))
+        self.layers.extend(clones(nn.Linear(2 * hidden_size, hidden_size), num_layers - 1))
         # Dropout
         self.dropout = nn.Dropout(1 - self.dp_keep_prob)
         # The output layer
@@ -89,7 +90,7 @@ class RNN(nn.Module):
         # For every layer
         for i in range(self.num_layers):
             # Initialize the weights and biases uniformly
-            b = 1/math.sqrt(self.hidden_size)
+            b = 1 / math.sqrt(self.hidden_size)
             nn.init.uniform_(self.layers[i].weight, -b, b)
             nn.init.uniform_(self.layers[i].bias, -b, b)
         # Initialize output layer weights uniformly in the range [-0.1, 0.1]
@@ -140,7 +141,7 @@ class RNN(nn.Module):
             device = torch.device("cpu")
 
         # Apply the Embedding layer on the input
-        embed_out = self.embeddings(inputs)# shape (seq_len,batch_size,emb_size)
+        embed_out = self.embeddings(inputs)  # shape (seq_len,batch_size,emb_size)
 
         # Create a tensor to store outputs during the Forward
         logits = torch.zeros(self.seq_len, self.batch_size, self.vocab_size).to(device)
@@ -160,6 +161,28 @@ class RNN(nn.Module):
             logits[timestep] = self.out_layer(input_)
 
         return logits, hidden
+
+
+    def hgrad(self, inputs, hidden):
+        if inputs.is_cuda:
+            device = inputs.get_device()
+        else:
+            device = torch.device("cpu")
+
+        hiddens = [hidden.clone()]
+        logits = torch.zeros(self.seq_len, self.batch_size, self.vocab_size).to(device)
+        embed_out = self.embeddings(inputs)
+        for timestep in range(self.seq_len):
+            h_prev = hiddens[timestep].clone()
+            hiddens.append(hiddens[timestep].clone())
+            input_ = self.dropout(embed_out[timestep])
+            for layer in range(self.num_layers):
+                hiddens[timestep+1][layer] = torch.tanh(
+                    self.layers[layer](torch.cat([input_, h_prev[layer]], 1)))
+                input_ = self.dropout(hiddens[timestep+1][layer])
+            logits[timestep] = self.out_layer(input_)
+        hiddens.pop(0)
+        return logits, hidden, hiddens
 
     # Problem 4.2
     def generate(self, inputs, hidden, generated_seq_len):
@@ -184,11 +207,28 @@ class RNN(nn.Module):
                         shape: (generated_seq_len, batch_size)
         """
         # TODO ========================
+        if inputs.is_cuda:
+            device = inputs.get_device()
+        else:
+            device = torch.device("cpu")
+        samples = torch.zeros((generated_seq_len, inputs.shape[0])).to(device=device)
+        input_ = inputs
+        for timestep in range(generated_seq_len):
+            embed_out = self.embeddings(input_)  # batch-size,self.embed_size
+            h_prev = hidden
+            for layer in range(self.num_layers):
+                hidden[layer] = torch.tanh(self.layers[layer](torch.cat([embed_out, h_prev[layer]], 1)))
+                embed_out = hidden[layer]
+
+            output_dist = F.softmax(self.out_layer(embed_out), 1)
+            # input_ = torch.squeeze(torch.multinomial(output_dist, 1))
+            input_ = torch.argmax(self.out_layer(embed_out),1)
+            samples[timestep] = input_
         return samples
 
 
 # Problem 1
-class GRU(nn.Module): # Implement a stacked GRU RNN
+class GRU(nn.Module):  # Implement a stacked GRU RNN
     """A stacked gated recurrent unit (GRU) RNN.
 
     Follow the same template as the RNN (above), but use the equations for
@@ -205,8 +245,9 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
     and once for the biases, in that order. If you follow the wrong order or
     call nn.init a different number of times the Gradescope tests will fail.
     """
+
     def __init__(self, emb_size, hidden_size, seq_len, batch_size, vocab_size,
-               num_layers, dp_keep_prob):
+                 num_layers, dp_keep_prob):
         super(GRU, self).__init__()
         # Model parameters
         self.emb_size = emb_size
@@ -218,22 +259,27 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
         self.batch_size = batch_size
         # TODO ========================
 
-        self.word_embeddings =
-
+        self.word_embeddings = nn.Embedding(self.vocab_size, self.emb_size)
+        self.layers = nn.ModuleList()
         # Create "reset gate" layers
-        self.r =
+        self.r = nn.ModuleList()
+        self.r.append(nn.Linear(self.emb_size + self.hidden_size, self.hidden_size))
+        self.r.extend(clones(nn.Linear(2 * self.hidden_size, self.hidden_size), self.num_layers - 1))
 
         # Create "forget gate" layers
-        self.z =
+        self.z = nn.ModuleList()
+        self.z.append(nn.Linear(self.emb_size + self.hidden_size, self.hidden_size))
+        self.z.extend(clones(nn.Linear(2 * self.hidden_size, self.hidden_size), self.num_layers - 1))
 
         # Create the "memory content" layers
-        self.h =
-
+        self.h = nn.ModuleList()
+        self.h.append(nn.Linear(self.emb_size + self.hidden_size, self.hidden_size))
+        self.h.extend(clones(nn.Linear(2 * self.hidden_size, self.hidden_size), self.num_layers - 1))
         # Dropout
-        self.dropout =
+        self.dropout = nn.Dropout(1 - self.dp_keep_prob)
 
         # The output layer
-        self.out_layer =
+        self.out_layer = nn.Linear(self.hidden_size, self.vocab_size)
 
         self.init_embedding_weights_uniform()
         self.init_reset_gate_weights_uniform()
@@ -243,18 +289,33 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
 
     def init_embedding_weights_uniform(self, init_range=0.1):
         # TODO ========================
+        nn.init.uniform_(self.word_embeddings.weight, -.1, .1)
 
     def init_reset_gate_weights_uniform(self):
         # TODO ========================
+        for layer in range(self.num_layers):
+            k = 1 / math.sqrt(self.hidden_size)
+            nn.init.uniform_(self.r[layer].weight, -k, k)
+            nn.init.uniform_(self.r[layer].bias, -k, k)
 
     def init_forget_gate_weights_uniform(self):
         # TODO ========================
+        for layer in range(self.num_layers):
+            k = 1 / math.sqrt(self.hidden_size)
+            nn.init.uniform_(self.z[layer].weight, -k, k)
+            nn.init.uniform_(self.z[layer].bias, -k, k)
 
     def init_memory_weights_uniform(self):
         # TODO ========================
+        for layer in range(self.num_layers):
+            k = 1 / math.sqrt(self.hidden_size)
+            nn.init.uniform_(self.h[layer].weight, -k, k)
+            nn.init.uniform_(self.h[layer].bias, -k, k)
 
     def init_out_layer_weights_uniform(self):
         # TODO ========================
+        nn.init.uniform_(self.out_layer.weight, -.1, .1)
+        nn.init.zeros_(self.out_layer.bias)
 
     def init_hidden(self):
         """
@@ -263,7 +324,7 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
         filled with zeros as the initial hidden states of the GRU.
         """
         # TODO ========================
-        return initial_hidden
+        return torch.zeros(self.num_layers, self.batch_size, self.hidden_size)
 
     def forward(self, inputs, hidden):
         """ Compute the recurrent updates.
@@ -296,7 +357,56 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
                         shape: (num_layers, batch_size, hidden_size)
         """
         # TODO ========================
+        if inputs.is_cuda:
+            device = inputs.get_device()
+        else:
+            device = torch.device('cpu')
+
+        embed_out = self.word_embeddings(inputs).float()
+        logits = torch.zeros(self.seq_len, self.batch_size, self.vocab_size, device=device)
+
+        for timestep in range(self.seq_len):
+            input_ = self.dropout(embed_out[timestep])
+            h_prev = hidden.clone()
+            for layer in range(self.num_layers):
+                concat = torch.cat([input_, h_prev[layer]], 1)
+                r_ = torch.sigmoid(self.r[layer](concat))
+                z_ = torch.sigmoid(self.z[layer](concat))
+                concat_h = torch.cat([input_, (r_ * h_prev[layer])], 1)
+                h_ = torch.tanh(self.h[layer](concat_h))
+                hidden[layer] = ((1 - z_) * h_prev[layer]) + (z_ * h_)
+                input_ = self.dropout(hidden[layer])
+
+            logits[timestep] = self.out_layer(input_)
+
         return logits, hidden
+
+    def hgrad(self, inputs, hidden):
+        if inputs.is_cuda:
+            device = inputs.get_device()
+        else:
+            device = torch.device("cpu")
+
+        hiddens = [hidden.clone()]
+        logits = torch.zeros(self.seq_len, self.batch_size, self.vocab_size).to(device)
+        embed_out = self.word_embeddings(inputs)
+
+        for timestep in range(self.seq_len):
+            h_prev = hiddens[timestep].clone()
+            hiddens.append(hiddens[timestep].clone())
+            input_ = self.dropout(embed_out[timestep])
+            for layer in range(self.num_layers):
+                concat = torch.cat([input_, h_prev[layer]], 1)
+                r_ = torch.sigmoid(self.r[layer](concat))
+                z_ = torch.sigmoid(self.z[layer](concat))
+                concat_h = torch.cat([input_, (r_ * h_prev[layer])], 1)
+                h_ = torch.tanh(self.h[layer](concat_h))
+                hiddens[timestep+1][layer] = ((1 - z_) * h_prev[layer]) + (z_ * h_)
+                input_ = self.dropout(hiddens[timestep+1][layer])
+            logits[timestep] = self.out_layer(input_)
+
+        hiddens.pop(0)
+        return logits, hidden, hiddens
 
     def generate(self, input, hidden, generated_seq_len):
         """
@@ -320,6 +430,29 @@ class GRU(nn.Module): # Implement a stacked GRU RNN
                         shape: (generated_seq_len, batch_size)
         """
         # TODO ========================
+        if input.is_cuda:
+            device = input.get_device()
+        else:
+            device = torch.device("cpu")
+
+        samples = torch.zeros((generated_seq_len, input.shape[0])).to(device=device)
+        input_ = input
+
+        for timestep in range(generated_seq_len):
+            input_ = self.word_embeddings(input_)  # batch-size,self.embed_size
+            h_prev = hidden
+            for layer in range(self.num_layers):
+                concat = torch.cat([input_, h_prev[layer]], 1)
+                r_ = torch.sigmoid(self.r[layer](concat))
+                z_ = torch.sigmoid(self.z[layer](concat))
+                h_ = torch.tanh(self.h[layer](torch.cat([input_, (r_ * h_prev[layer])], 1)))
+                hidden[layer] = ((1 - z_) * h_prev[layer]) + (z_ * h_)
+                input_ = self.dropout(hidden[layer])
+
+            # input_ = torch.squeeze(torch.multinomial(F.softmax(self.out_layer(input_), 1), 1))
+            input_ = torch.argmax(self.out_layer(input_),1)
+            samples[timestep] = input_
+
         return samples
 
 
@@ -356,33 +489,33 @@ The complete model consists of the embeddings, the stacked transformer blocks,
 and a linear layer followed by a softmax.
 """
 
-#This code has been modified from an open-source project, by David Krueger.
-#The original license is included below:
-#MIT License
+
+# This code has been modified from an open-source project, by David Krueger.
+# The original license is included below:
+# MIT License
 #
-#Copyright (c) 2018 Alexander Rush
+# Copyright (c) 2018 Alexander Rush
 #
-#Permission is hereby granted, free of charge, to any person obtaining a copy
-#of this software and associated documentation files (the "Software"), to deal
-#in the Software without restriction, including without limitation the rights
-#to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-#copies of the Software, and to permit persons to whom the Software is
-#furnished to do so, subject to the following conditions:
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
 #
-#The above copyright notice and this permission notice shall be included in all
-#copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-#IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-#AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-#OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-#SOFTWARE.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 
-
-#----------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 
 class MultiHeadedAttention(nn.Module):
     def __init__(self, n_heads, n_units, dropout=0.1):
@@ -400,7 +533,7 @@ class MultiHeadedAttention(nn.Module):
         self.n_units = n_units
         self.n_heads = n_heads
         # TODO ========================
-        # Create the layers below. self.linears should contain 3 linear
+        # Create the layers below. self.linear should contain 3 linear
         # layers that compute the projection from n_units => n_heads x d_k
         # (one for each of query, key and value) plus an additional final layer
         # (4 in total)
@@ -412,20 +545,15 @@ class MultiHeadedAttention(nn.Module):
         # Note: the only Pytorch modules you are allowed to use are nn.Linear
         # and nn.Dropout. You can also use softmax, masked_fill and the "clones"
         # function we provide.
-        self.linears =
-        self.dropout =
+        self.linears = nn.ModuleList()
+        self.linears.extend(clones(nn.Linear(self.n_units, self.n_units), 4))
+
+        self.dropout = nn.Dropout(dropout)
 
     def attention(self, query, key, value, mask=None, dropout=None):
         # Implement scaled dot product attention
-        # The query, key, and value inputs will be of size
-        # batch_size x n_heads x seq_len x d_k
-        # (If making a single call to attention in your forward method)
-        # and mask (if not None) will be of size
-        # batch_size x 1 x seq_len x seq_len
-
         # As described in the .tex, apply input masking to the softmax
         # generating the "attention values" (i.e. A_i in the .tex)
-
         # Also apply dropout to the attention values.
         # This method needs to compare query and keys first, then mask positions
         # if a mask is provided, normalize the scores, apply dropout and then
@@ -433,20 +561,21 @@ class MultiHeadedAttention(nn.Module):
         # When applying the mask, use values -1e9 for the masked positions.
         # The method returns the result of the attention operation as well as
         # the normalized scores after dropout.
-
+        # B is the batch size, T is the sequence length, d_value is the size
+        # of the key.value features
         # TODO ========================
-        scores =
+        scores = (query @ key.transpose(-2, -1))
+        scores /= math.sqrt(self.d_k)
         if mask is not None:
             if len(mask.size()) == 3 and len(query.size()) == 4:
                 mask.unsqueeze(1)
-            scores = scores.masked_fill()
-        norm_scores =
+            scores = scores.masked_fill(mask == 0, -1e9)
+        norm_scores = F.softmax(scores, dim=-1)
         if dropout is not None:
-            norm_scores =  # Tensor of shape batch_size x n_heads x seq_len x seq_len
-        output = # Tensor of shape batch_size x n_heads x seq_len x d_k
+            norm_scores = self.dropout(norm_scores)  # Tensor of shape B x T x T
+        output = norm_scores @ value  # Tensor of shape B x T x d_value
 
         return output, norm_scores
-
 
     def forward(self, query, key, value, mask=None):
         # Implement the masked multi-head attention.
@@ -458,24 +587,21 @@ class MultiHeadedAttention(nn.Module):
             # Same mask applied to all n_heads heads.
             mask = mask.unsqueeze(1)
         # TODO ========================
+        batch_size = query.shape[0]
         # 1) Do all the linear projections in batch from n_units => n_heads x d_k
-
+        query_ = self.linears[0](query).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
+        key_ = self.linears[1](key).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
+        value_ = self.linears[2](value).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
         # 2) Apply attention on all the projected vectors in batch.
-        # The query, key, value inputs to the attention method will be of size
-        # batch_size x n_heads x seq_len x d_k
-
+        scores, _ = self.attention(query_, key_, value_, mask=mask, dropout=self.dropout)
         # 3) "Concat" using a view and apply a final linear.
+        scores = scores.transpose(1, 2).contiguous()
+        concated = scores.view(batch_size, -1, self.n_units)
+        output = self.linears[3](concated)
+        return output  # size: (batch_size, seq_len, self.n_units)
 
 
-        return # size: (batch_size, seq_len, self.n_units)
-
-
-
-
-
-
-
-#----------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 # The encodings of elements of the input sequence
 
 class WordEmbedding(nn.Module):
@@ -485,7 +611,7 @@ class WordEmbedding(nn.Module):
         self.n_units = n_units
 
     def forward(self, x):
-        #print (x)
+        # print (x)
         return self.lut(x) * math.sqrt(self.n_units)
 
 
@@ -510,8 +636,7 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-
-#----------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 # The TransformerBlock and the full Transformer
 
 
@@ -524,15 +649,16 @@ class TransformerBlock(nn.Module):
         self.sublayer = clones(ResidualSkipConnectionWithLayerNorm(size, dropout), 2)
 
     def forward(self, x, mask):
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask)) # apply the self-attention
-        return self.sublayer[1](x, self.feed_forward) # apply the position-wise MLP
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))  # apply the self-attention
+        return self.sublayer[1](x, self.feed_forward)  # apply the position-wise MLP
 
 
 class TransformerStack(nn.Module):
     """
     This will be called on the TransformerBlock (above) to create a stack.
     """
-    def __init__(self, layer, n_blocks): # layer will be TransformerBlock (below)
+
+    def __init__(self, layer, n_blocks):  # layer will be TransformerBlock (below)
         super(TransformerStack, self).__init__()
         self.layers = clones(layer, n_blocks)
         self.norm = LayerNorm(layer.size)
@@ -567,7 +693,7 @@ def make_model(vocab_size, n_blocks=6,
         embedding=nn.Sequential(WordEmbedding(n_units, vocab_size), c(position)),
         n_units=n_units,
         vocab_size=vocab_size
-        )
+    )
 
     # Initialize parameters with Glorot / fan_avg.
     for p in model.parameters():
@@ -576,7 +702,7 @@ def make_model(vocab_size, n_blocks=6,
     return model
 
 
-#----------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 # Data processing
 
 def subsequent_mask(size):
@@ -585,8 +711,10 @@ def subsequent_mask(size):
     subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
     return torch.from_numpy(subsequent_mask) == 0
 
+
 class Batch:
     "Object for holding a batch of data with mask during training."
+
     def __init__(self, x, pad=0):
         self.data = x
         self.mask = self.make_mask(self.data, pad)
@@ -600,11 +728,12 @@ class Batch:
         return mask
 
 
-#----------------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 # Some standard modules
 
 class LayerNorm(nn.Module):
     "layer normalization, as in: https://arxiv.org/abs/1607.06450"
+
     def __init__(self, features, eps=1e-6):
         super(LayerNorm, self).__init__()
         self.a_2 = nn.Parameter(torch.ones(features))
@@ -622,6 +751,7 @@ class ResidualSkipConnectionWithLayerNorm(nn.Module):
     A residual connection followed by a layer norm.
     Note for code simplicity the norm is first as opposed to last.
     """
+
     def __init__(self, size, dropout):
         super(ResidualSkipConnectionWithLayerNorm, self).__init__()
         self.norm = LayerNorm(size)
@@ -636,6 +766,7 @@ class MLP(nn.Module):
     """
     This is just an MLP with 1 hidden layer
     """
+
     def __init__(self, n_units, dropout=0.1):
         super(MLP, self).__init__()
         self.w_1 = nn.Linear(n_units, 2048)

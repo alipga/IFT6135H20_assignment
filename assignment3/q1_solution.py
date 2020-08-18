@@ -23,7 +23,8 @@ def log_likelihood_bernoulli(mu, target):
     target = target.view(batch_size, -1)
 
     # log_likelihood_bernoulli
-    return
+    l = target * torch.log(mu) + (1-target) * torch.log(1-mu)
+    return torch.sum(l,dim=1)
 
 
 def log_likelihood_normal(mu, logvar, z):
@@ -39,12 +40,15 @@ def log_likelihood_normal(mu, logvar, z):
     """
     # init
     batch_size = mu.size(0)
+    input_size= mu.size(1)
     mu = mu.view(batch_size, -1)
     logvar = logvar.view(batch_size, -1)
     z = z.view(batch_size, -1)
 
     # log normal
-    return
+    const = torch.log(torch.tensor(2*np.pi))
+    l = -.5*(logvar+((z-mu)**2)/logvar.exp()+const)
+    return l.sum(dim=1)
 
 
 def log_mean_exp(y):
@@ -61,7 +65,9 @@ def log_mean_exp(y):
     sample_size = y.size(1)
 
     # log_mean_exp
-    return
+
+    a_i,_ = y.max(dim=1)
+    return (y-a_i.unsqueeze(1)).exp().mean(dim=1).log()+a_i
 
 
 def kl_gaussian_gaussian_analytic(mu_q, logvar_q, mu_p, logvar_p):
@@ -84,7 +90,9 @@ def kl_gaussian_gaussian_analytic(mu_q, logvar_q, mu_p, logvar_p):
     logvar_p = logvar_p.view(batch_size, -1)
 
     # kld
-    return
+    KLd = .5*((logvar_q-logvar_p).exp()+((mu_q-mu_p)**2)/logvar_p.exp()+(logvar_p-logvar_q)-1)
+    return KLd.sum(dim=1)
+
 
 
 def kl_gaussian_gaussian_mc(mu_q, logvar_q, mu_p, logvar_p, num_samples=1):
@@ -109,4 +117,8 @@ def kl_gaussian_gaussian_mc(mu_q, logvar_q, mu_p, logvar_p, num_samples=1):
     logvar_p = logvar_p.view(batch_size, -1).unsqueeze(1).expand(batch_size, num_samples, input_size)
 
     # kld
-    return
+    x = torch.normal(mean=mu_q,std=logvar_q.exp())
+    KLd = (log_likelihood_normal(mu_q,logvar_q,x)
+           -log_likelihood_normal(mu_p,logvar_p,x))\
+          /num_samples
+    return KLd

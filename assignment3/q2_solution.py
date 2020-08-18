@@ -21,7 +21,20 @@ def lp_reg(x, y, critic):
     :param critic: (Module) - torch module that you want to regularize.
     :return: (FloatTensor) - shape: (1,) - Lipschitz penalty
     """
-    pass
+
+    uniform_dist = torch.distributions.uniform.Uniform(torch.tensor([0.0]),torch.tensor([1.0]))
+    t = uniform_dist.sample(torch.tensor([x.size(0)]))
+    x_hat = torch.autograd.Variable(t*x + (1-t)*y,requires_grad=True)
+    f = critic(x_hat)
+    lp = torch.autograd.grad(outputs=f,
+                             inputs=x_hat,
+                             grad_outputs=torch.ones(f.size()),
+                             create_graph=True,
+                             retain_graph=True,
+                             only_inputs=True)[0]
+    lp = lp.norm(dim=1)-1
+    lp[lp<0] = 0
+    return torch.mean(lp**2)
 
 
 def vf_wasserstein_distance(x, y, critic):
@@ -38,7 +51,7 @@ def vf_wasserstein_distance(x, y, critic):
     :param critic: (Module) - torch module used to compute the Wasserstein distance
     :return: (FloatTensor) - shape: (1,) - Estimate of the Wasserstein distance
     """
-    pass
+    return torch.mean(critic(x))-torch.mean(critic(y))
 
 
 def vf_squared_hellinger(x, y, critic):
@@ -53,7 +66,7 @@ def vf_squared_hellinger(x, y, critic):
     :param critic: (Module) - torch module used to compute the Squared Hellinger.
     :return: (FloatTensor) - shape: (1,) - Estimate of the Squared Hellinger
     """
-    pass
+    return torch.mean(1-torch.exp(-critic(x)))-torch.mean((1-torch.exp(-critic(y)))/(torch.exp(-critic(y))))
 
 
 if __name__ == '__main__':
@@ -64,3 +77,4 @@ if __name__ == '__main__':
     theta = 0
     sampler2 = iter(q2_sampler.distribution1(theta, 512))
     lambda_reg_lp = 50 # Recommended hyper parameters for the lipschitz regularizer.
+

@@ -40,7 +40,7 @@ class NN(object):
         self.n_hidden = len(hidden_dims)
         self.lr = lr
         self.batch_size = batch_size
-        self.init_method = init_method
+        self.init_method = 'Glorot'
         self.seed = seed
         self.activation_str = activation
         self.epsilon = epsilon
@@ -68,57 +68,75 @@ class NN(object):
         for layer_n in range(1, self.n_hidden + 2):
             # WRITE CODE HERE
             self.weights[f"b{layer_n}"] = np.zeros((1, all_dims[layer_n]))
+            weight_size = (all_dims[layer_n -1],all_dims[layer_n])
+            if self.init_method == 'Zeros':
+                self.weights[f"W{layer_n}"] = np.zeros(weight_size)
+            elif self.init_method == 'Normal':
+                self.weights[f"W{layer_n}"] = np.random.normal(0,1,weight_size)
+            elif self.init_method == 'Glorot':
+                d = np.sqrt(6.0/(all_dims[layer_n]+all_dims[layer_n-1]))
+                self.weights[f"W{layer_n}"] = np.random.uniform(-d , d , size=weight_size )
+            else:
+                raise ValueError(f'{self.init_method} initialization method is not valid')
+
 
     def relu(self, x, grad=False):
         if grad:
             # WRITE CODE HERE
-            pass
+            ret = (x > 0 ).astype(np.int)
         # WRITE CODE HERE
-        pass
-        return 0
+        else:
+            ret = np.maximum(x,0)
+        # raise ValueError(f'{x.shape}')
+        return ret
 
     def sigmoid(self, x, grad=False):
         if grad:
             # WRITE CODE HERE
-            pass
+            ret = np.exp(-x)/(1+np.exp(-x))**2
         # WRITE CODE HERE
-        pass
-        return 0
+        else:
+            ret = 1/(1+np.exp(-x))
+        return ret
 
     def tanh(self, x, grad=False):
         if grad:
             # WRITE CODE HERE
-            pass
+            ret = 1 - ((np.exp(x)-np.exp(-x))/(np.exp(x)+np.exp(-x)))**2
         # WRITE CODE HERE
-        pass
-        return 0
+        else:
+            ret = (np.exp(x)-np.exp(-x))/(np.exp(x)+np.exp(-x))
+        return ret
 
     def activation(self, x, grad=False):
         if self.activation_str == "relu":
             # WRITE CODE HERE
-            pass
+            ret = self.relu(x,grad)
         elif self.activation_str == "sigmoid":
             # WRITE CODE HERE
-            pass
+            ret = self.sigmoid(x,grad)
         elif self.activation_str == "tanh":
             # WRITE CODE HERE
-            pass
+            ret = self.tanh(x,grad)
         else:
-            raise Exception("invalid")
-        return 0
+            raise Exception(f'{self.activation_str} activation is not valid')
+        return ret
 
     def softmax(self, x):
         # Remember that softmax(x-C) = softmax(x) when C is a constant.
         # WRITE CODE HERE
-        pass
-        return 0
+        return np.exp(x) / np.sum(np.exp(x),axis=-1,keepdims=True)
 
     def forward(self, x):
         cache = {"Z0": x}
         # cache is a dictionnary with keys Z0, A0, ..., Zm, Am where m - 1 is the number of hidden layers
         # Ai corresponds to the preactivation at layer i, Zi corresponds to the activation at layer i
         # WRITE CODE HERE
-        pass
+        for layer_num in range(1,self.n_hidden+2):
+            cache[f'A{layer_num}'] = cache[f'Z{layer_num - 1}'] @ self.weights[f'W{layer_num}'] + self.weights[f'b{layer_num}']
+            if layer_num != self.n_hidden+1:
+                cache[f"Z{layer_num}"] = self.activation(cache[f'A{layer_num}'])
+        cache[f"Z{self.n_hidden+1}"] = self.softmax(cache[f'A{self.n_hidden+1}'])
         return cache
 
     def backward(self, cache, labels):
@@ -126,13 +144,30 @@ class NN(object):
         grads = {}
         # grads is a dictionnary with keys dAm, dWm, dbm, dZ(m-1), dA(m-1), ..., dW1, db1
         # WRITE CODE HERE
-        pass
+        batch_size = labels.shape[0]
+        grads[f'dA{self.n_hidden+1}'] = -(labels-output)
+        for layer_num in range(self.n_hidden+1,0,-1):
+            if layer_num != self.n_hidden+1:
+                grads[f'dZ{layer_num}'] = grads[f'dA{layer_num+1}'] @ self.weights[f'W{layer_num+1}'].T
+                grads[f'dA{layer_num}'] = grads[f'dZ{layer_num}'] * self.activation(cache[f'Z{layer_num}'],grad=True)
+            grads[f'dW{layer_num}'] = (cache[f'Z{layer_num-1}'].T @ grads[f'dA{layer_num}'])*(1./batch_size)
+            # raise ValueError('{}\n{}\n{}\n{}'.format(grads[f'dW{layer_num}'].shape,cache[f'Z{layer_num-1}'].shape,grads[f'dA{layer_num}'].shape,self.weights[f'W{layer_num}'].shape))
+            grads[f'db{layer_num}'] = np.sum(grads[f'dA{layer_num}'],axis=0,keepdims=True)*(1./batch_size)
         return grads
 
     def update(self, grads):
+        # raise ValueError(self.weights['W1'])
         for layer in range(1, self.n_hidden + 2):
             # WRITE CODE HERE
-            pass
+            # raise RuntimeError('b:{}\ndb:{}\nw:{}\ndw:{}\n'.format(self.weights[f'b{layer}'].shape,grads[f'db{layer}'].shape,
+            #                                                        self.weights[f'W{layer}'].shape,grads[f'dW{layer}'].shape))
+            # print(self.weights[f'b{layer}'].shape)
+            # print(np.sum(grads[f'db{layer}'],axis=0,keepdims=True).shape)
+            # print(grads[f'db{layer}'].shape)
+            # print(self.weights[f'W{layer}'].shape)
+            # print(grads[f'dW{layer}'].shape)
+            self.weights[f'W{layer}'] -= self.lr * grads[f'dW{layer}']
+            self.weights[f'b{layer}'] -= self.lr * grads[f'db{layer}']
 
     # def one_hot(self, y, n_classes=None):
     #     n_classes = n_classes or self.n_classes
@@ -142,8 +177,8 @@ class NN(object):
         prediction[np.where(prediction < self.epsilon)] = self.epsilon
         prediction[np.where(prediction > 1 - self.epsilon)] = 1 - self.epsilon
         # WRITE CODE HERE
-        pass
-        return 0
+        # raise ValueError('{}\n{}\n{}'.format(prediction.shape,prediction[0],labels.shape))
+        return np.sum(-np.sum(labels * np.log(prediction),axis=1))/labels.shape[0]
 
     def compute_loss_and_accuracy(self, X, y):
         one_y = y
@@ -167,7 +202,10 @@ class NN(object):
                 minibatchX = X_train[self.batch_size * batch:self.batch_size * (batch + 1), :]
                 minibatchY = y_onehot[self.batch_size * batch:self.batch_size * (batch + 1), :]
                 # WRITE CODE HERE
-                pass
+                cache = self.forward(minibatchX)
+                grads = self.backward(cache,minibatchY)
+                self.update(grads)
+
 
             X_train, y_train = self.train
             train_loss, train_accuracy, _ = self.compute_loss_and_accuracy(X_train, y_train)
@@ -185,3 +223,6 @@ class NN(object):
         X_test, y_test = self.test
         test_loss, test_accuracy, _ = self.compute_loss_and_accuracy(X_test, y_test)
         return test_loss, test_accuracy
+
+model = NN(seed=1,data=load_mnist())
+print(model.train_loop(n_epochs=10))
